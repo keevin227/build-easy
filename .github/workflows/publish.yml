@@ -1,0 +1,42 @@
+# Keeps the live site (https://keevin227.github.io/build-easy/, served from main)
+# in sync with work pushed to claude/** branches: each push is merged into main
+# and a Pages build is requested, so no manual merge is needed.
+name: Publish to main
+
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: publish-to-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge the pushed commit into main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$GITHUB_SHA"
+          # Fast-forward when possible; if main moved meanwhile, the pushed branch's version wins.
+          git merge --ff-only "$GITHUB_SHA" \
+            || git merge -X theirs --no-edit -m "Publish $GITHUB_REF_NAME to main" "$GITHUB_SHA"
+          git push origin main
+
+      - name: Request a Pages build
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds"
