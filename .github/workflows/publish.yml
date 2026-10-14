@@ -1,6 +1,6 @@
 # Keeps the live site (https://keevin227.github.io/build-easy/, served from main)
 # in sync with work pushed to claude/** branches: each push is merged into main
-# and a Pages build is requested, so no manual merge is needed.
+# GitHub Pages rebuilds from that push, and the run checks the live site.
 name: Publish to main
 
 on:
@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
 
 concurrency:
   group: publish-to-main
@@ -35,8 +34,16 @@ jobs:
             || git merge -X theirs --no-edit -m "Publish $GITHUB_REF_NAME to main" "$GITHUB_SHA"
           git push origin main
 
-      - name: Request a Pages build
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds"
+      # The push to main triggers the Pages build. Then confirm the live site
+      # really serves this exact content, so a failed or stuck deploy shows up as a red run.
+      - name: Verify the live site serves this version
+        run: |
+          want=$(git show "$GITHUB_SHA":proposal.json | sha256sum | cut -d' ' -f1)
+          url="https://keevin227.github.io/build-easy/proposal.json"
+          for i in $(seq 1 60); do
+            got=$(curl -fsSL -H 'Cache-Control: no-cache' "$url?t=$(date +%s%N)" | sha256sum | cut -d' ' -f1) || true
+            if [ "$got" = "$want" ]; then echo "Live site is up to date (after ~$((i*20))s)."; exit 0; fi
+            sleep 20
+          done
+          echo "::error::Live site still serves an older version after 20 minutes. Check the 'pages build and deployment' runs."
+          exit 1
